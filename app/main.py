@@ -1,7 +1,11 @@
 # app/main.py
 
 import logging
-from fastapi import FastAPI, HTTPException
+import asyncio
+from typing import List
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
+from jinja2 import Template
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -27,3 +31,125 @@ app.add_middleware(
 
 # Include the API router
 app.include_router(router, prefix="/api/v1")
+
+tasks = {}  # Global dictionary to store tasks
+clients: List[WebSocket] = []  # List of connected WebSocket clients
+
+# Function to simulate a long-running task
+async def long_running_task(task_id: str, duration: int):
+    try:
+        for i in range(duration):
+            await asyncio.sleep(1)  # Simulate work by sleeping
+            # Optionally, send progress updates
+        tasks[task_id]['status'] = 'completed'
+    except asyncio.CancelledError:
+        tasks[task_id]['status'] = 'cancelled'
+        raise
+    finally:
+        update_clients()
+
+# Function to update all clients with the latest task information
+def update_clients():
+    data = {"tasks": [{"task_id": task_id, "status": tasks[task_id]['status']} for task_id in tasks.keys()]}
+    for client in clients:
+        asyncio.create_task(client.send_json(data))
+
+# Function to get the status of all tasks
+@app.get("/tasks/status")
+async def get_task_status():
+    return [{"task_id": task_id, "status": tasks[task_id]['status']} for task_id in tasks.keys()]
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    """
+    Serve the enhanced dashboard HTML with Tailwind CSS and WebSocket support.
+    """
+    template = Template("""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Task Dashboard</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-100 text-gray-800">
+        <div class="container mx-auto p-4">
+            <h1 class="text-3xl font-bold mb-4">Task Dashboard</h1>
+            <div id="task-container" class="space-y-4">
+                {% for task in running_tasks %}
+                    <div class="bg-white p-4 shadow rounded task" id="task-{{ task.task_id }}">
+                        <span>Task ID: {{ task.task_id }}</span>
+                        <button class="bg-red-500 text-white py-1 px-2 rounded ml-4" onclick="cancelTask('{{ task.task_id }}')">Cancel</button>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        <script>
+            const ws = new WebSocket(`ws://${location.host}/ws`);
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const taskContainer = document.getElementById('task-container');
+                taskContainer.innerHTML = '';
+
+                data.tasks.forEach(task => {
+                    const taskDiv = document.createElement('div');
+                    taskDiv.className = 'bg-white p-4 shadow rounded task';
+                    taskDiv.id = 'task-' + task.task_id;
+
+                    taskDiv.innerHTML = `
+                        <span>Task ID: ${task.task_id}</span>
+                        <button class="bg-red-500 text-white py-1 px-2 rounded ml-4" onclick="cancelTask('${task.task_id}')">Cancel</button>
+                    `;
+
+                    taskContainer.appendChild(taskDiv);
+                });
+            };
+
+            async function cancelTask(task_id) {
+                const response = await fetch('/tasks/cancel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: task_id })
+                });
+                if (response.ok) {
+                    alert('Task ' + task_id + ' cancelled.');
+                } else {
+                    alert('Failed to cancel task ' + task_id);
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """)
+
+    running_tasks = [{"task_id": task_id} for task_id in tasks.keys()]
+    html_content = template.render(running_tasks=running_tasks)
+    return HTMLResponse(content=html_content)
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint to send real-time task updates to clients.
+    """
+    await websocket.accept()
+    clients.append(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # Keep connection open
+    except WebSocketDisconnect:
+        clients.remove(websocket)
+
+@app.post("/tasks/cancel")
+async def cancel_task(task: dict):
+    """
+    Cancel a specific background task and notify clients.
+    """
+    task_id = task.get("task_id")
+    if task_id in tasks:
+        tasks[task_id].cancel()  # Assuming tasks are asyncio tasks
+        del tasks[task_id]
+        update_clients()
+        return {"status": "task cancelled"}
+    return {"status": "task not found"}, 404

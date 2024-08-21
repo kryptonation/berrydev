@@ -19,6 +19,8 @@ async def init_background_task(source: str):
     Args:
         source (str): Data source to sync data from
     """
+    if source not in ["crm", "marketing"]:
+        raise ValueError("Invalid data source")
     task = asyncio.create_task(sync_sources_data(source))
     tasks[task.get_name()] = task
     logger.info(f"Background task {task.get_name()} started")
@@ -38,6 +40,7 @@ def cancel_task(task_id: str):
     if task:
         task.cancel()
         logger.info(f"Background task {task.get_name()} cancelled")
+        del tasks[task_id]
         return True
     else:
         logger.error(f"Task with ID {task_id} not found")
@@ -51,4 +54,4 @@ def get_tasks_list() -> list:
     Returns:
         list: List of running background tasks
     """
-    return [tasks.keys()]
+    return [task_id for task_id in tasks.keys()]

@@ -2,6 +2,7 @@
 
 import logging
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.models import Customer, Campaign
@@ -84,7 +85,11 @@ async def list_tasks():
     """
     running_tasks = get_tasks_list()
     logging.info(f"Listing running tasks: {running_tasks}")
-    return {"tasks": running_tasks}
+
+    # Ensure only task IDs (as strings) are returned
+    serialized_tasks = [task_id for task_id in running_tasks]
+    
+    return {"tasks": serialized_tasks}
 
 
 @router.post("/tasks/cancel")

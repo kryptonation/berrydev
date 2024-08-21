@@ -16,10 +16,10 @@ async def fetch_data_from_source(source: str, params: dict) -> dict:
     Returns:
         dict: Data fetched from the source API
     """
-    headers = {"X-API-KEY": settings.api_key}
+    headers = {"X-API-Key": settings.api_key}
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.api_url}/{source}", headers=headers, params=params)
+            response = await client.get(source, headers=headers, params=params)
             response.raise_for_status()
             logger.info(f"Fetched data from {source}")
             return response.json()

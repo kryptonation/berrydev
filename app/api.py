@@ -18,6 +18,8 @@ async def sync_sources_data(source: str):
     """
     db = SessionLocal()
     try:
+        if source not in ["crm", "marketing"]:
+            raise ValueError("Invalid data source")
         if source == "crm":
             data = await fetch_data_from_source(settings.crm_api_url, {"limit": 100})
             for customer in data.get("results", []):
