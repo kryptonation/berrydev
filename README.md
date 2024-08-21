@@ -46,31 +46,55 @@ This project is a FastAPI application that serves as a task management dashboard
 ## API Endpoints
 
 - **GET /dashboard:** Returns the HTML for the task dashboard.
-- **POST /tasks/add:** Adds a new task. Requires a `duration` parameter (in seconds).
-- **POST /tasks/cancel:** Cancels an existing task. Requires a `task_id` parameter.
+- **POST /tasks/add:** Adds a new task. Requires a JSON body with `duration` parameter (in seconds).
+- **POST /tasks/cancel:** Cancels an existing task. Requires a JSON body with `task_id` parameter.
 - **GET /tasks/status:** Returns the status of all tasks.
 - **WebSocket /ws:** WebSocket endpoint for real-time task updates.
 
-## Usage
+### Example of Adding a Task
 
-1. **Adding a Task:**
-   - Enter the duration (in seconds) in the provided input field and click "Add Task".
-   - The task will start running, and its status will be displayed on the dashboard.
+To add a task with a duration of 10 seconds:
 
-2. **Canceling a Task:**
-   - Click the "Cancel" button next to a running task to stop it.
-   - The dashboard will update in real-time to reflect the cancellation.
+```bash
+curl -X POST "http://localhost:8000/tasks/add" -H "Content-Type: application/json" -d '{"duration": 10}'
+```
 
-3. **Monitoring Task Status:**
-   - The dashboard automatically updates the status of all tasks in real-time.
+### Example of Canceling a Task
 
-## Real-time Updates
+To cancel a task with a specific `task_id`:
 
-This application uses WebSockets to provide real-time updates to all connected clients. Whenever a task is added, updated, or canceled, all clients are immediately notified, and their dashboards are refreshed.
+```bash
+curl -X POST "http://localhost:8000/tasks/cancel" -H "Content-Type: application/json" -d '{"task_id": "your-task-id"}'
+```
 
-## Tailwind CSS
+## Data Modeling Decisions
 
-The application is styled using Tailwind CSS, which is included via a CDN link. This makes the interface responsive and modern, with minimal custom CSS required.
+The application uses a simple in-memory data structure (a Python dictionary) to store tasks. Each task is assigned a unique ID, and the dictionary stores the task's status and reference to the `asyncio.Task` object. This allows the application to manage tasks efficiently without needing a persistent database for this use case.
+
+## Background Task Management
+
+Background tasks are managed using Python's `asyncio` library. Each task is created using `asyncio.create_task()` and is tracked in a global dictionary. This allows the application to perform long-running tasks asynchronously, providing non-blocking task management.
+
+### Key Considerations:
+- **Task Creation:** Tasks are created asynchronously to avoid blocking the main application thread.
+- **Task Cancellation:** Tasks can be canceled using the `cancel()` method provided by `asyncio`. The status of canceled tasks is updated accordingly.
+- **Real-Time Updates:** The dashboard is updated in real-time using WebSockets, allowing users to see the status of tasks without refreshing the page.
+
+## Troubleshooting Common Issues
+
+### Missing `duration` Parameter in /tasks/add
+
+If you encounter an error like `{"detail": [{"loc": ["query", "duration"], "msg": "Field required"}]`, ensure that you are sending the `duration` parameter in the JSON body of the POST request.
+
+### Cancel Task Error
+
+If you see an error like `AttributeError: 'NoneType' object has no attribute 'cancel'` when canceling a task, it indicates that the task might not be properly initialized. Ensure that tasks are correctly created and stored in the global `tasks` dictionary.
+
+## Usage of AI in Building the Project
+
+While AI was not directly used in the execution of this project, AI tools were utilized for:
+- **Code Suggestions:** AI-assisted coding tools helped streamline the development process by providing quick recommendations and ensuring best practices.
+- **Debugging:** AI-assisted tools were used to analyze errors and provide guidance on fixing issues efficiently.
 
 ## Future Enhancements
 

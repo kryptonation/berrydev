@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import uuid
 from typing import List
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Request
 from jinja2 import Template
@@ -35,6 +36,9 @@ app.include_router(router, prefix="/api/v1")
 tasks = {}  # Global dictionary to store tasks
 clients: List[WebSocket] = []  # List of connected WebSocket clients
 
+tasks = {}  # Global dictionary to store tasks
+clients: List[WebSocket] = []  # List of connected WebSocket clients
+
 # Function to simulate a long-running task
 async def long_running_task(task_id: str, duration: int):
     try:
@@ -54,16 +58,9 @@ def update_clients():
     for client in clients:
         asyncio.create_task(client.send_json(data))
 
-# Function to get the status of all tasks
-@app.get("/tasks/status")
-async def get_task_status():
-    return [{"task_id": task_id, "status": tasks[task_id]['status']} for task_id in tasks.keys()]
-
+# Serve the enhanced dashboard HTML with Tailwind CSS and WebSocket support
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    """
-    Serve the enhanced dashboard HTML with Tailwind CSS and WebSocket support.
-    """
+async def dashboard():
     template = Template("""
     <!DOCTYPE html>
     <html lang="en">
@@ -79,10 +76,15 @@ async def dashboard(request: Request):
             <div id="task-container" class="space-y-4">
                 {% for task in running_tasks %}
                     <div class="bg-white p-4 shadow rounded task" id="task-{{ task.task_id }}">
-                        <span>Task ID: {{ task.task_id }}</span>
+                        <span>Task ID: {{ task.task_id }} ({{ task.status }})</span>
                         <button class="bg-red-500 text-white py-1 px-2 rounded ml-4" onclick="cancelTask('{{ task.task_id }}')">Cancel</button>
                     </div>
                 {% endfor %}
+            </div>
+            <div class="mt-6">
+                <h2 class="text-xl font-semibold">Add New Task</h2>
+                <input type="number" id="task-duration" placeholder="Duration in seconds" class="border border-gray-300 p-2 rounded">
+                <button class="bg-blue-500 text-white py-1 px-4 rounded" onclick="addTask()">Add Task</button>
             </div>
         </div>
         <script>
@@ -99,13 +101,28 @@ async def dashboard(request: Request):
                     taskDiv.id = 'task-' + task.task_id;
 
                     taskDiv.innerHTML = `
-                        <span>Task ID: ${task.task_id}</span>
+                        <span>Task ID: ${task.task_id} (${task.status})</span>
                         <button class="bg-red-500 text-white py-1 px-2 rounded ml-4" onclick="cancelTask('${task.task_id}')">Cancel</button>
                     `;
 
                     taskContainer.appendChild(taskDiv);
                 });
             };
+
+            async function addTask() {
+                const duration = document.getElementById('task-duration').value;
+                const response = await fetch(`/tasks/add?duration=${duration}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ duration: duration })
+                });
+                if (response.ok) {
+                    alert('Task added.');
+                    document.getElementById('task-duration').value = '';
+                } else {
+                    alert('Failed to add task.');
+                }
+            }
 
             async function cancelTask(task_id) {
                 const response = await fetch('/tasks/cancel', {
@@ -124,15 +141,13 @@ async def dashboard(request: Request):
     </html>
     """)
 
-    running_tasks = [{"task_id": task_id} for task_id in tasks.keys()]
+    running_tasks = [{"task_id": task_id, "status": tasks[task_id]['status']} for task_id in tasks.keys()]
     html_content = template.render(running_tasks=running_tasks)
     return HTMLResponse(content=html_content)
 
+# WebSocket endpoint to send real-time task updates to clients
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """
-    WebSocket endpoint to send real-time task updates to clients.
-    """
     await websocket.accept()
     clients.append(websocket)
     try:
@@ -141,15 +156,29 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         clients.remove(websocket)
 
+# Endpoint to add a new task
+@app.post("/tasks/add")
+async def add_task(background_tasks: BackgroundTasks, duration: int):
+    task_id = str(uuid.uuid4())
+    tasks[task_id] = {
+        "task": background_tasks.add_task(long_running_task, task_id, duration),
+        "status": "running"
+    }
+    update_clients()
+    return {"task_id": task_id, "status": "running"}
+
+# Endpoint to cancel a specific task
 @app.post("/tasks/cancel")
 async def cancel_task(task: dict):
-    """
-    Cancel a specific background task and notify clients.
-    """
     task_id = task.get("task_id")
-    if task_id in tasks:
-        tasks[task_id].cancel()  # Assuming tasks are asyncio tasks
-        del tasks[task_id]
-        update_clients()
-        return {"status": "task cancelled"}
-    return {"status": "task not found"}, 404
+    if task_id not in tasks:
+        return {"status": "task not found"}, 404
+
+    task_to_cancel = tasks[task_id].get("task")
+    if task_to_cancel is None:
+        return {"status": "task cannot be cancelled, not found or already completed"}, 400
+
+    task_to_cancel.cancel()  # This will raise an exception if the task is None
+    tasks[task_id]['status'] = 'cancelled'
+    update_clients()
+    return {"status": "task cancelled"}
