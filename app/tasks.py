@@ -17,7 +17,7 @@ async def init_background_task(source: str):
     Create and init background task to sync data from source
 
     Args:
-        source (str): Data source to sync data from (eg: 'crm', 'marketing')
+        source (str): Data source to sync data from
     """
     task = asyncio.create_task(sync_sources_data(source))
     tasks[task.get_name()] = task
