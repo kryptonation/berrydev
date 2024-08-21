@@ -1,0 +1,9 @@
+fastapi[all]
+uvicorn[standard]
+sqlalchemy
+databases
+alembic
+pydantic
+pydantic-settings
+httpx
+asyncio
